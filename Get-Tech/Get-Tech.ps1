@@ -28,15 +28,14 @@ $logDir = "C:\Users\Public\Downloads\Get-Tech\logs"
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 $phase = @(Get-ChildItem -Path $logDir -Filter "script-log-*.txt" -File -ErrorAction SilentlyContinue).Count
 
-# If unregister fails on pass 3: reboot, purge schtask & settings, then force stop
+# If the expected unregister schtask fails 3: reboot, purge schtask & settings, then force stop
 if ($phase -eq 4) { 
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-    powercfg /change standby-timeout-ac 10
-    powercfg /change monitor-timeout-ac 10
-    powercfg /change standby-timeout-dc 5
-    powercfg /change monitor-timeout-dc 5
+    powercfg /change standby-timeout-ac 10  # Set sleep timeout when plugged in
+    powercfg /change monitor-timeout-ac 10  # Set display timeout when plugged in
+    powercfg /change standby-timeout-dc 5   # Set sleep timeout on battery
+    powercfg /change monitor-timeout-dc 5   # Set display timeout on battery
     exit }
-
 
 # stay awake / caffeinate - prevent sleep from interrupting updates
 powercfg /change standby-timeout-ac 0
@@ -89,8 +88,7 @@ $xmlfile="<?xml version=""1.0""?>
 $XMLFILE > ($profilefile)
 netsh wlan add profile filename="$($profilefile)"
 netsh wlan show profiles $SSID key=clear
-netsh wlan connect name=$SSID
-}
+netsh wlan connect name=$SSID }
 
 # Start logging
 Start-Transcript -Path "$logDir\script-log-$(Get-Date -Format 'yyyyMMdd-HHmmss').txt"
@@ -110,6 +108,7 @@ if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) 
 
 
 ### DETECT MANUFACTURER ###
+# Reads the baseboard manufacturer field with a regex then declares $vendor based on the contents
 $vendor = switch -Regex ((Get-CimInstance -ClassName Win32_ComputerSystem).Manufacturer) {
     "Dell"       { "DELL" }
     "HP|Hewlett" { "HP" }
@@ -120,7 +119,7 @@ $vendor = switch -Regex ((Get-CimInstance -ClassName Win32_ComputerSystem).Manuf
 
 ### KICK THE STACK ###
 
-# Recalibrate Windows Time Service
+# Reset the Windows Time Service
 net start w32time  # start service, in case it hasn't started
 Start-Sleep 3      # wait 3 secs
 net stop w32time   # stop service, so we can re-register
@@ -138,15 +137,19 @@ Set-Service -Name TrustedInstaller -StartupType Manual
 # Enable Windows Update's "Get Me Up to Date" setting
 reg add "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" /v IsExpedited /t REG_DWORD /d 1 /f
 
-# Wake up Windows Update Service Stack by using W32Time to sync with NTP
-do { Start-Sleep -Seconds 3 ; w32tm /resync /force } until ($LASTEXITCODE -eq 0) #This binary exits successfuly, but the desired sync always fails on the first run, so run it twice 
-do { Start-Sleep -Seconds 3 ; w32tm /resync /force } until ($LASTEXITCODE -eq 0)
+# Wake up Windows Update Service Stack by using W32Time to sync with NTP, with a slight wait to prevent errors
+# W32Time only completes the desired sync if run twice
+do { Start-Sleep -Seconds 3
+     w32tm /resync /force } until ($LASTEXITCODE -eq 0)
+do { Start-Sleep -Seconds 3
+     w32tm /resync /force } until ($LASTEXITCODE -eq 0)
 
-# Pause until DNS can find Windows Update - if this hangs, ping them individually from a different device on the same subnet and reimage the device if the pings succeed
+# Pause until DNS can find Windows Update
+# If this hangs indefinitely despite good connections and DNS being up, reimage
 do { Start-Sleep -Seconds 5 } until (Resolve-DNSname -Name "download.windowsupdate.com" -ErrorAction Continue) #Find MS Windows Update server
 do { Start-Sleep -Seconds 5 } until (Resolve-DNSname -Name "cdn.powershellgallery.com" -ErrorAction Continue)  #Find the PowerShell Gallery
 
-# Tell the Windows Update component that sits below the GUI to fetch updates now so we can get critical drivers (e.g. net, kb, touchpad)
+# Force the Windows Update component that sits below the GUI to fetch updates now so we can get critical drivers (e.g. net, kb, touchpad)
 usoclient /scaninstallwait 
 
 
@@ -160,31 +163,49 @@ if ($phase -eq 0) {
     Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
 
 # Install PSWU if it's not already installed
-    if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) { Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -Scope AllUsers }
+    if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+    Install-Module -Name PSWindowsUpdate -Force -Confirm:$false -Scope AllUsers }
 
 # For Dell, checks DCU-CLI is preinstalled because even silent installation is slow
-    if ($vendor -like "DELL" -and -not (Test-Path "C:\Program Files\Dell\CommandUpdate\dcu-cli.exe")) { winget install Dell.CommandUpdate.Universal --silent --accept-source-agreements --accept-package-agreements }
+    if ($vendor -like "DELL" -and -not (Test-Path "C:\Program Files\Dell\CommandUpdate\dcu-cli.exe")) {
+    winget install Dell.CommandUpdate.Universal --silent --accept-source-agreements --accept-package-agreements }
 
 # For HP, install Image Assistant
-    if ($vendor -like "HP") { winget install hp.imageassistant }
+    if ($vendor -like "HP") {
+    winget install hp.imageassistant }
 
 # For Lenovo, install LSUClient
-    if ($vendor -like "LENOVO" -and -not (Get-Module -ListAvailable -Name LSUClient)) { Install-Module -Name LSUClient -Force -Confirm:$false -Scope AllUsers } }
+    if ($vendor -like "LENOVO" -and -not (Get-Module -ListAvailable -Name LSUClient)) {
+    Install-Module -Name LSUClient -Force -Confirm:$false -Scope AllUsers } }
 
 
 
 ### FIRMWARE ###
 
-# Select vendor-specific updater and ArgList based on baseboard vendor reported by windows
+# Select vendor-specific updater and ArgList based on baseboard vendor
 function Invoke-FirmwareUpdate { switch ($vendor) {
-        "DELL"    { Start-Process -FilePath "C:\Program Files\Dell\CommandUpdate\dcu-cli.exe" -ArgumentList "/applyupdates -updatetype=bios,firmware,driver,application -reboot=disable -autoSuspendBitLocker=enable" -Wait; break }
-        "HP"      { Start-Process -FilePath "C:\SWSetup\HPImageAssistant\HPImageAssistant.exe" -ArgumentList "/Operation:Analyze /Action:Install /Category:All,Accessories /Selection:All /Silent" -Wait; break }
+        "DELL"    { Start-Process -FilePath "C:\Program Files\Dell\CommandUpdate\dcu-cli.exe" `
+                   -ArgumentList "/applyupdates -updatetype=bios,firmware,driver,application -reboot=disable -autoSuspendBitLocker=enable" `
+                   -Wait
+                    break }
+                   
+        "HP"      { Start-Process -FilePath "C:\SWSetup\HPImageAssistant\HPImageAssistant.exe" `
+                   -ArgumentList "/Operation:Analyze /Action:Install /Category:All,Accessories /Selection:All /Silent" `
+                   -Wait
+                    break }
+                   
         "LENOVO"  { Import-Module LSUClient
                     $updates = Get-LSUpdate | Where-Object { $_.Installer.Unattended }
                     $updates | Save-LSUpdate
-                    $updates | Install-LSUpdate; break }
-        "Unknown" { Write-Verbose "Unsupported vendor; skipping."; break }
-        default   { Write-Verbose "Unexpected Error; skipping." } } }   #If you get this error while working in controlled environments, you may need to reimage, flash bios, both, or recycle the device.
+                    $updates | Install-LSUpdate
+                    break }
+                    
+        "Unknown" { Write-Verbose "Unsupported vendor - skipping."
+                    break }
+                    
+        #If you get the Unexpected Error while working in controlled environments, you may need to reimage, flash bios, both, or recycle the device.
+        default   { Write-Verbose "Unexpected Error - skipping." } } }
+        
 
 # Bust $profilefile ghost if it exists - fails with a benign error if it doesn't
 # For some reason this became necessary during testing, and only worked in this exact step in the process
@@ -194,14 +215,13 @@ if ($phase -eq 0) { Remove-Item -Path "C:\Users\Public\Downloads\Get-Tech\$profi
 
 ### Update Routine ###
 
-## Run the updates for the current phase, then reboot to advance to the next phase
-# Try to fetch drivers via Windows Update before gettig OS updates
+## Run updates for the current phase, then reboot to advance to the next phase
 Import-Module PSWindowsUpdate -Force
 
 # Get updates, 
 switch ($phase) {
-    0 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot      # Drivers only, no OS updates
-        Invoke-FirmwareUpdate                                                                  # Vendor-served drivers and firmware updates
+    0 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot              # Drivers only, no OS updates
+        Invoke-FirmwareUpdate                                                                          # Vendor-served drivers and firmware updates
         Invoke-FirmwareUpdate }
     1 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot
         Invoke-FirmwareUpdate
@@ -209,16 +229,16 @@ switch ($phase) {
     2 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot
         Invoke-FirmwareUpdate
         Invoke-FirmwareUpdate }
-    3 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle Preview -IgnoreReboot # OS Updates, excluding Previews
+    3 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle Preview -IgnoreReboot         # OS Updates, excluding Previews
         Invoke-FirmwareUpdate
         Invoke-FirmwareUpdate
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue } }
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue } } # Remove Scheduled Task
 
-# All-phase reset-and-stop routine
+# All-phase reset-and-stop routine, uses typical windows power settings
 powercfg /change standby-timeout-ac 10
 powercfg /change monitor-timeout-ac 10
 powercfg /change standby-timeout-dc 5
 powercfg /change monitor-timeout-dc 5
 Stop-Transcript
-shutdown /r /f /t 0
+shutdown /f /r /t 0
 
