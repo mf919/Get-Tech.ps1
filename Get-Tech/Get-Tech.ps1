@@ -28,7 +28,7 @@ $logDir = "C:\Users\Public\Downloads\Get-Tech\logs"
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 $phase = @(Get-ChildItem -Path $logDir -Filter "script-log-*.txt" -File -ErrorAction SilentlyContinue).Count
 
-# If the expected unregister schtask fails 3: reboot, purge schtask & settings, then force stop
+# If the expected unregister schtask fails on 'phase -eq 3': reboot, purge schtask & settings, then force stop
 if ($phase -eq 4) { 
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     powercfg /change standby-timeout-ac 10  # Set sleep timeout when plugged in
