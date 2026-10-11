@@ -15,7 +15,7 @@
 # Place .bat launcher and customized script in C:\Users\Public\Downloads\Get-Tech\
 #
 # Post-run procedure:
-# Confirm updates were completed by looking for the Get-Tech task in Task Scheduler
+# Confirm updates were completed by checking the Get-Tech task was automatically deleted in Task Scheduler
 # Run updates manually once from Settings and LCV/DCU/HPSA to allow the Settings app to update its cache and for Windows to attach the last round of drivers
 # Restart and apply updates (Win + X, U, A)
 # Use Device Manager to ensure drivers were assigned
