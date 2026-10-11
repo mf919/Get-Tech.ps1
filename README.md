@@ -18,7 +18,7 @@ Updating a gold image on a baremetal system before cloning to a fleet of the sam
 
 ## Usage
 - Double-click Launcher.bat, accept the UAC prompt
-- Continue working on a different device/project while the script works (approx. 10-20 runtime)
+- Continue working on a different device/project while the script works (approx. 10-20m runtime)
 
 ## Post-run procedure:
 - Confirm updates were completed by checking the Get-Tech task was automatically deleted in Task Scheduler
