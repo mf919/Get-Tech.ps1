@@ -1,10 +1,9 @@
 #Requires -RunAsAdministrator
 
-# Get-Tech.ps1 - v1.0.0 release - (C) 2026 Mike Frazier - MIT License
+# Get-Tech.ps1 - v1.0.1 release - (C) 2026 Mike Frazier - MIT License
 #
-# Description:
-# Simple automation of essential Windows and Lenovo/HP/Dell updates on refurbished devices.
-# Usecases: updating a gold image on a baremetal system before cloning to a fleet of the same model, or  easing the updating process for a large quantities of unsimilar devices.
+# Description: Simple automation of essential Windows and Lenovo/HP/Dell updates on refurbished devices.
+# Usecases: Updating a gold image on a baremetal system before cloning to a fleet of the same model, or  easing the updating process for a large quantities of unsimilar devices.
 #
 # Before you begin:
 # Connect AC adapter & ethernet
@@ -23,13 +22,14 @@
 # For gold images, run image integrity tools on the source host before capturing to reduce downstream corruption
 
 
-# Determine active phase by counting this script's logs:
+# Determine current phase by counting this script's logs:
 $logDir = "C:\Users\Public\Downloads\Get-Tech\logs"
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 $phase = @(Get-ChildItem -Path $logDir -Filter "script-log-*.txt" -File -ErrorAction SilentlyContinue).Count
 
-# If the expected unregister schtask fails on 'phase -eq 3': reboot, purge schtask & settings, then force stop
+# If the expected schtask unregister fails during phase 3, purge schtask & clear modified settings, then force stop
 if ($phase -eq 4) { 
+    reg add "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" /v IsExpedited /t REG_DWORD /d 0 /f # Turn off Get Me Up To Date
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
     powercfg /change standby-timeout-ac 10  # Set sleep timeout when plugged in
     powercfg /change monitor-timeout-ac 10  # Set display timeout when plugged in
@@ -37,7 +37,7 @@ if ($phase -eq 4) {
     powercfg /change monitor-timeout-dc 5   # Set display timeout on battery
     exit }
 
-# stay awake / caffeinate - prevent sleep from interrupting updates
+# Prevent sleep from interrupting updates
 powercfg /change standby-timeout-ac 0
 powercfg /change monitor-timeout-ac 0
 powercfg /change standby-timeout-dc 0
@@ -119,13 +119,14 @@ $vendor = switch -Regex ((Get-CimInstance -ClassName Win32_ComputerSystem).Manuf
 
 ### KICK THE STACK ###
 
-# Reset the Windows Time Service
-net start w32time  # start service, in case it hasn't started
-Start-Sleep 3      # wait 3 secs
-net stop w32time   # stop service, so we can re-register
-w32tm /unregister  # unregister
-w32tm /register    # re-register
-net start w32time  # start service
+if ($phase -eq 0) {
+# Rebuild the Windows Time Service registration
+net start w32time  # Start service
+Start-Sleep 3      # Wait 3 secs to avoid errors
+net stop w32time   # Stop service
+w32tm /unregister  # Unregister
+w32tm /register    # Re-register
+net start w32time  # Start service
 
 # Make service stack components automatic (in case they aren't) and align them
 Set-Service -Name w32time -StartupType Automatic       # Windows Time Service
@@ -134,8 +135,9 @@ Set-Service -Name cryptSvc -StartupType Automatic      # Cryptographic Service
 Set-Service -Name BITS -StartupType Automatic          # Background Intelligent Transfer Service
 Set-Service -Name TrustedInstaller -StartupType Manual 
 
-# Enable Windows Update's "Get Me Up to Date" setting
-reg add "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" /v IsExpedited /t REG_DWORD /d 1 /f
+# Set Windows Update's "Get Me Up to Date" setting
+# In theory, if an unexpected hang happens when installing updates, windows will automatically reboot to apply updates, continuing our process
+reg add "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" /v IsExpedited /t REG_DWORD /d 1 /f }
 
 # Wake up Windows Update Service Stack by using W32Time to sync with NTP, with a slight wait to prevent errors
 # W32Time only completes the desired sync if run twice
@@ -146,18 +148,17 @@ do { Start-Sleep -Seconds 3
 
 # Pause until DNS can find Windows Update
 # If this hangs indefinitely despite good connections and DNS being up, reimage
-do { Start-Sleep -Seconds 5 } until (Resolve-DNSname -Name "download.windowsupdate.com" -ErrorAction Continue) #Find MS Windows Update server
-do { Start-Sleep -Seconds 5 } until (Resolve-DNSname -Name "cdn.powershellgallery.com" -ErrorAction Continue)  #Find the PowerShell Gallery
+do { Start-Sleep -Seconds 5 } until (Resolve-DNSname -Name "download.windowsupdate.com" -ErrorAction Continue) #Find Windows Update
+do { Start-Sleep -Seconds 5 } until (Resolve-DNSname -Name "cdn.powershellgallery.com" -ErrorAction Continue)  #Find PowerShell Gallery
 
-# Force the Windows Update component that sits below the GUI to fetch updates now so we can get critical drivers (e.g. net, kb, touchpad)
-usoclient /scaninstallwait 
+# In the event of a broken PSWindowsUpdate installation, this will get the majority of our drivers
+usoclient /scaninstallwait
 
 
 
 ### INSTALL MISSING TRUSTS & SOFTWARE ###
 
 if ($phase -eq 0) {
-
 # Trust PSGallery and update NuGet and PowerShellGet
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers -Confirm:$false 
     Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
@@ -184,44 +185,44 @@ if ($phase -eq 0) {
 
 # Select vendor-specific updater and ArgList based on baseboard vendor
 function Invoke-FirmwareUpdate { switch ($vendor) {
-        "DELL"    { Start-Process -FilePath "C:\Program Files\Dell\CommandUpdate\dcu-cli.exe" `
-                   -ArgumentList "/applyupdates -updatetype=bios,firmware,driver,application -reboot=disable -autoSuspendBitLocker=enable" `
-                   -Wait
-                    break }
+
+    "DELL"    { Start-Process -FilePath "C:\Program Files\Dell\CommandUpdate\dcu-cli.exe" `
+               -ArgumentList "/applyupdates -updatetype=bios,firmware,driver,application -reboot=disable -autoSuspendBitLocker=enable" `
+               -Wait
+                break }
+
+    "HP"      { Start-Process -FilePath "C:\SWSetup\HPImageAssistant\HPImageAssistant.exe" `
+               -ArgumentList "/Operation:Analyze /Action:Install /Category:All,Accessories /Selection:All /Silent" `
+               -Wait
+                break }
                    
-        "HP"      { Start-Process -FilePath "C:\SWSetup\HPImageAssistant\HPImageAssistant.exe" `
-                   -ArgumentList "/Operation:Analyze /Action:Install /Category:All,Accessories /Selection:All /Silent" `
-                   -Wait
-                    break }
-                   
-        "LENOVO"  { Import-Module LSUClient
-                    $updates = Get-LSUpdate | Where-Object { $_.Installer.Unattended }
-                    $updates | Save-LSUpdate
-                    $updates | Install-LSUpdate
-                    break }
+    "LENOVO"  { Import-Module LSUClient
+               $updates = Get-LSUpdate | Where-Object { $_.Installer.Unattended }
+               $updates | Save-LSUpdate
+               $updates | Install-LSUpdate
+                break }
+
+    "Unknown" { Write-Verbose "Unsupported vendor - skipping."
+                break }
                     
-        "Unknown" { Write-Verbose "Unsupported vendor - skipping."
-                    break }
-                    
-        #If you get the Unexpected Error while working in controlled environments, you may need to reimage, flash bios, both, or recycle the device.
-        default   { Write-Verbose "Unexpected Error - skipping." } } }
-        
+     # If you get the Unexpected Error while working in controlled environments, you may need to reimage, flash bios, both, or recycle the device.
+     default   { Write-Verbose "Unexpected Error - skipping." } } }
 
 # Bust $profilefile ghost if it exists - fails with a benign error if it doesn't
-# For some reason this became necessary during testing, and only worked in this exact step in the process
+# For some reason this became necessary during testing, and only consistently worked in this exact step in the process
 if ($phase -eq 0) { Remove-Item -Path "C:\Users\Public\Downloads\Get-Tech\$profilefile" -Force }
 
 
 
 ### Update Routine ###
 
-## Run updates for the current phase, then reboot to advance to the next phase
+## Run updates for the current phase, then reboot and continue
 Import-Module PSWindowsUpdate -Force
 
 # Get updates, 
 switch ($phase) {
-    0 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot              # Drivers only, no OS updates
-        Invoke-FirmwareUpdate                                                                          # Vendor-served drivers and firmware updates
+    0 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot               # Drivers only, no OS updates
+        Invoke-FirmwareUpdate                                                                           # Vendor-served drivers and firmware updates
         Invoke-FirmwareUpdate }
     1 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot
         Invoke-FirmwareUpdate
@@ -229,10 +230,11 @@ switch ($phase) {
     2 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle KB -IgnoreReboot
         Invoke-FirmwareUpdate
         Invoke-FirmwareUpdate }
-    3 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle Preview -IgnoreReboot         # OS Updates, excluding Previews
+    3 { Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -NotTitle Preview -IgnoreReboot          # OS Updates, excluding Previews
         Invoke-FirmwareUpdate
         Invoke-FirmwareUpdate
-        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue } } # Remove Scheduled Task
+        reg add "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" /v IsExpedited /t REG_DWORD /d 0 /f # Turn off Get Me Up To Date
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue } }  # Remove Scheduled Task
 
 # All-phase reset-and-stop routine, uses typical windows power settings
 powercfg /change standby-timeout-ac 10
@@ -241,4 +243,3 @@ powercfg /change standby-timeout-dc 5
 powercfg /change monitor-timeout-dc 5
 Stop-Transcript
 shutdown /f /r /t 0
-
