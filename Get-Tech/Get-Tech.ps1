@@ -10,7 +10,7 @@
 # Install battery (for best results, charged to >25% capacity)
 # Install Windows 11
 # For Dell devices, install Dell Command | Update Windows Universal Application
-# Check wifi acccess point is on and reachable
+# Check wifi access point is on and reachable
 # Set wifi credentials in the ADD THE WIFI portion of the script
 # Place .bat launcher and customized script in C:\Users\Public\Downloads\Get-Tech\
 #
