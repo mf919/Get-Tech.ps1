@@ -27,7 +27,7 @@ Updating a gold image on a bare-metal system before cloning to a fleet of the sa
 4. Continue working on a different device/project while the script works (approx. 10-20m runtime).
 
 > [!NOTE]
-> For new users: Launcher is only included for convenience, use your preferred launch method. It only needs to run as admin in PowerShell 5.1 or newer.
+> For new users: This launcher is only included for convenience, so feel free to use your preferred launch method. It only needs to run as admin in PowerShell 5.1 or newer.
 
 Once you're confident in the consistency of its output, you can disable the verbose logging by commenting out the `$VerbosePreference` line.
 
