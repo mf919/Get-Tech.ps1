@@ -44,7 +44,7 @@ Once you're confident in the consistency of its output, you can disable the verb
 
 ## License
 
-Get-Tech.ps1 a generic MIT license. Launcher.bat is public domain.
+Get-Tech.ps1 uses the MIT license. Launcher.bat is public domain.
 
 ## TO-DO
 
