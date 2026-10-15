@@ -204,8 +204,8 @@ function Invoke-FirmwareUpdate { switch ($vendor) {
      default   { Write-Verbose "Unexpected Error - skipping." } } }
 
 # Bust $profilefile ghost if it exists - fails with a benign error if it doesn't
-# For some reason this became necessary during testing, and only consistently worked in this exact step in the process
-if ($phase -eq 0) { Remove-Item -Path "C:\Users\Public\Downloads\Get-Tech\$profilefile" -Force }
+# For some reason this became necessary during testing, and only works here
+if ($phase -eq 0) { Remove-Item $profilefile -Force }
 
 
 
