@@ -1,6 +1,6 @@
 # Get-Tech.ps1
 
-![Version](https://img.shields.io/badge/release-v1.0.1-blue) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#license) © 2026 Mike Frazier
+![Version](https://img.shields.io/badge/release-v1.0.2-blue) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](#license) © 2026 Mike Frazier
 
 Simple automation of essential Windows and Lenovo/HP/Dell updates on refurbished devices.
 
