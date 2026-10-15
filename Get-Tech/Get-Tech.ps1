@@ -1,10 +1,10 @@
 #Requires -RunAsAdministrator
 
-# Get-Tech.ps1 - v1.0.1 release - (C) 2026 Mike Frazier - MIT License
+# Get-Tech.ps1 - v1.0.2 release - (C) 2026 Mike Frazier - MIT License
 #
 # Description: Simple automation of essential Windows and Lenovo/HP/Dell updates on refurbished devices.
 #
-# Usage 
+# Usage: 
 # Set wifi credentials in the ADD THE WIFI portion of the script
 # Run as administrator from the directory C:\Users\Public\Downloads\Get-Tech\
 #
@@ -18,12 +18,15 @@
 # Determine current phase by counting this script's logs:
 $logDir = "C:\Users\Public\Downloads\Get-Tech\logs"
 if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
-$phase = @(Get-ChildItem -Path $logDir -Filter "script-log-*.txt" -File -ErrorAction SilentlyContinue).Count
+$phase = @(Get-ChildItem -Path $logDir -Filter "script-log-*.txt" -File -ErrorAction Continue).Count
 
-# If the expected schtask unregister fails during phase 3, purge schtask & clear modified settings, then force stop
+#Declare $taskName to enable safety net
+$taskName = "Get-Tech"
+
+# Safety net: if the expected schtask unregister fails during phase 3, unreg schtask & clear modified settings, then exit
 if ($phase -eq 4) { 
     reg add "HKLM\SOFTWARE\Microsoft\WindowsUpdate\UX\Settings" /v IsExpedited /t REG_DWORD /d 0 /f # Turn off Get Me Up To Date
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Continue
     powercfg /change standby-timeout-ac 10  # Set sleep timeout when plugged in
     powercfg /change monitor-timeout-ac 10  # Set display timeout when plugged in
     powercfg /change standby-timeout-dc 5   # Set sleep timeout on battery
@@ -90,8 +93,7 @@ Start-Transcript -Path "$logDir\script-log-$(Get-Date -Format 'yyyyMMdd-HHmmss')
 $VerbosePreference = "Continue"
 
 # Schedule a startup task as system so it can run without logon
-$taskName = "Get-Tech"
-if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction Continue)) {
     $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`""
     $trigger   = New-ScheduledTaskTrigger -AtStartup
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -235,4 +237,4 @@ powercfg /change monitor-timeout-ac 10
 powercfg /change standby-timeout-dc 5
 powercfg /change monitor-timeout-dc 5
 Stop-Transcript
-shutdown /f /r /t 0
+shutdown /r /t 0
