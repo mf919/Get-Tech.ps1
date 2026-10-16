@@ -42,6 +42,8 @@ Once you're confident in the consistency of its output, you can disable the verb
 - There's no integrity or availability check for `wuauserv.exe` before running PSWU. If it's unavailable, it will just fail. If I can find an efficient way to add this in the future, I will.
 - PowerShell modules can fail if they encounter malformed update information. This is beyond my control and typically remedied by the reboot-and-update cycle built into the script.
 
+> On Wi-Fi: A wifi configuration template and method were included in the automation for the purpose of keeping at least one network interface alive if drivers disable the other, which is essential to reliably completing the update cycle. For security reasons, it's recommended the WiFi network you choose to add uses device isolation, does not have access to sensitive internal systems, and is broadcasting from a dedicated WAP not broadcasting other SSID's. Never store hardcoded credentials to sensitive networks in plaintext.
+
 ## License
 
 Get-Tech.ps1 uses the MIT license. Launcher.bat is public domain.
